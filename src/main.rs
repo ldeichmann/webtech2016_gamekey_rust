@@ -38,34 +38,53 @@ struct User {
     signature : String
 }
 
-// JSON value representation
-// impl ToJson for User {
-//     fn to_json(&self) -> Json {
-//         Json::String(format!("{}+{}+{}+{}+{}i", self.name, self.id, self.email, self.created, self.signature))
-//     }
-// }
-
 impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {} {} {} {}", self.name, self.id, self.email, self.signature, self.created)
     }
 }
 
-// struct Game {
-//     name: String,
-//     id: String,
-//     url: String,
-//     signature: String,
-//     created: String
-// }
-//
-// struct Gamestate {
-//     gameid: String,
-//     userid: String,
-//     created: String,
-//     state: String
-// }
+#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+struct Game {
+    name: String,
+    id: String,
+    url: String,
+    signature: String,
+    created: String
+}
 
+impl fmt::Display for Game {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {} {} {} {}", self.name, self.id, self.url, self.signature, self.created)
+    }
+}
+
+#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+struct Gamestate {
+    gameid: String,
+    userid: String,
+    created: String,
+    state: String
+}
+
+impl fmt::Display for Gamestate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {} {} {}", self.gameid, self.userid, self.created, self.state)
+    }
+}
+
+#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+struct GameKey {
+    users: LinkedList<User>,
+    games: LinkedList<Game>,
+    gamestates: LinkedList<Gamestate>
+}
+
+impl fmt::Display for GameKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?} {:?} {:?}", self.users, self.games, self.gamestates)
+    }
+}
 
 #[derive(Debug)]
 pub struct InvalidMail;
@@ -82,9 +101,59 @@ impl fmt::Display for InvalidMail {
     }
 }
 
-fn store_users(list: LinkedList<User>) {
-    let js = json::encode(&list).unwrap();
-    println!("\nstore_users:\n{}\n", (&js).to_string());
+fn create_gamekey() -> GameKey {
+
+    let users: LinkedList<User> = LinkedList::new();
+    let games: LinkedList<Game> = LinkedList::new();
+    let gamestates: LinkedList<Gamestate> = LinkedList::new();
+
+    GameKey {users: users, games: games, gamestates: gamestates}
+
+}
+
+fn get_gamekey() -> GameKey {
+
+    let path = Path::new("foo.txt");
+    let display = path.display();
+
+    let mut file = match File::open(&path) {
+        // The `description` method of `io::Error` returns a string that
+        // describes the error
+        Err(why) => {
+            println!("couldn't open {}: {}", display, Error::description(&why));
+            return create_gamekey();
+        },
+        Ok(file) => {
+            file
+        },
+    };
+
+    // Read the file contents into a string, returns `io::Result<usize>`
+    let mut s = String::new();
+    match file.read_to_string(&mut s) {
+        Err(why) => panic!("couldn't read {}: {}", display,
+                                                   Error::description(&why)),
+        Ok(_) => println!("{} contains:\n{}", display, s),
+    }
+
+    let gk: GameKey = match json::decode(s.as_str()) {
+        Ok(s) => {
+            s
+        },
+        Err(err) => {
+            println!("gk match err: {}", err);
+            create_gamekey()
+        }
+    };
+    println!("gk match: {}", gk);
+
+    return create_gamekey();
+
+}
+
+fn save_gamekey(gk: GameKey) {
+    let js = json::encode(&gk).unwrap();
+    println!("\nsave_gamekey got:\n{}\n", (&js).to_string());
 
     let path = Path::new("foo.txt");
     let display = path.display();
@@ -99,7 +168,6 @@ fn store_users(list: LinkedList<User>) {
         }
     };
 
-    // Write the `LOREM_IPSUM` string to `file`, returns `io::Result<()>`
     match file.write_all(js.as_bytes()) {
         Err(why) => {
             panic!("couldn't write to {}: {}", display, Error::description(&why))
@@ -108,12 +176,13 @@ fn store_users(list: LinkedList<User>) {
             println!("successfully wrote to {}", display);
         }
     }
-
 }
+
 
 fn main() {
 
-    let users = Arc::new(Mutex::new(LinkedList::new()));
+    let storage = Arc::new(Mutex::new(get_gamekey()));
+    // let users = Arc::new(Mutex::new(LinkedList::new()));
     // let mut games = LinkedList::new();
     // let mut gamestates = LinkedList::new();
 
@@ -136,14 +205,32 @@ fn main() {
             }
         });
 
+        let storage_clone = storage.clone();
         api.get("users", |endpoint| {
             endpoint.summary("Lists all registered users");
             endpoint.desc("");
-            endpoint.handle(|client, params| {
-                client.json(params)
+            // let storage_clone = storage.clone();
+            endpoint.handle(move |client, _| {
+                let users: LinkedList<User> = storage_clone.lock().unwrap().users.clone();
+
+                let user_json = match json::encode(&users) {
+                    Ok(v) => {
+                        v
+                    },
+                    Err(err) => {
+                        panic!("fuck {:?}", err);
+                    }
+                };
+
+                println!("get user: {:?}", user_json.to_string());
+
+                let test = json::Json::from_str(&user_json.to_string()).unwrap();
+
+                client.json(&test)
             })
         });
 
+        let storage_clone = storage.clone();
         api.post("user", |endpoint| {
             endpoint.summary("Creates a user");
             endpoint.desc("Use this to create a user");
@@ -153,23 +240,25 @@ fn main() {
                 params.opt_typed("mail", json_dsl::string());
             });
             endpoint.handle(move |client, params| {
-                let name = params.find_path(&["name"]).unwrap().to_string();
-                let pwd  = params.find_path(&["pwd"]).unwrap().to_string();
-                let sig = (String::new() + &name + &pwd).as_bytes().to_base64(STANDARD);
-                let mail = params.find_path(&["mail"]).unwrap().to_string();
-                let created = chrono::UTC::now().to_string();
-                let id = Uuid::new_v4().to_string();
+                let message_object = params.as_object().unwrap();
+
+                let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string();
+                let new_pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
+                let new_sig = (String::new() + &new_name + &new_pwd).as_bytes().to_base64(STANDARD);
+                let new_mail = message_object.get("mail").unwrap().as_string().unwrap().to_string();
+                let new_created = chrono::UTC::now().to_string();
+                let new_id = Uuid::new_v4().to_string();
+
                 let new_user = User {
-                                name: name,
-                                id: id,
-                                email: mail,
-                                signature: sig,
-                                created: created
+                                name: new_name,
+                                id: new_id,
+                                email: new_mail,
+                                signature: new_sig,
+                                created: new_created
                               };
                 println!("new_user: {}", &new_user);
-                users.lock().unwrap().push_front(new_user);
-                println!("{:?}", users);
-                store_users(users.lock().unwrap().clone());
+                storage_clone.lock().unwrap().users.push_front(new_user);
+                save_gamekey(storage_clone.lock().unwrap().clone());
                 client.json(params)
             })
         });
