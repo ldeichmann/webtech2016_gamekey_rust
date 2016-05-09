@@ -23,9 +23,9 @@ use rustless::server::status;
 use rustless::batteries::swagger;
 use rustless::{Nesting};
 
-use serialize::json::ToJson;
+use serialize::json;
 
-#[derive(Debug)]
+#[derive(Debug, RustcDecodable, RustcEncodable)]
 struct User {
     name: String,
     id: String,
@@ -33,6 +33,13 @@ struct User {
     created: String,
     signature : String
 }
+
+// JSON value representation
+// impl ToJson for User {
+//     fn to_json(&self) -> Json {
+//         Json::String(format!("{}+{}+{}+{}+{}i", self.name, self.id, self.email, self.created, self.signature))
+//     }
+// }
 
 impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -69,6 +76,11 @@ impl fmt::Display for InvalidMail {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         self.description().fmt(formatter)
     }
+}
+
+fn store_users(list: LinkedList<User>) {
+    let js = json::encode(list);
+    println!("{}", js.to_string());
 }
 
 fn main() {
@@ -137,12 +149,20 @@ fn main() {
             endpoint.summary("Retrieves user data");
             endpoint.desc("Use this to retrieve a users data");
             endpoint.params(|params| {
-                params.req_typed("name", json_dsl::string());
+                params.req_typed("id", json_dsl::string());
                 params.req_typed("pwd", json_dsl::string());
                 params.opt_typed("byname", json_dsl::boolean());
             });
             endpoint.handle(|client, params| {
-                println!("Get User ID");
+                let id = params.find_path(&["id"]).unwrap().to_string();
+                let pwd  = params.find_path(&["pwd"]).unwrap().to_string();
+                match params.find_path(&["byname"]) {
+                    None => { println!("no byname"); }
+                    Some(byname) => {
+                        println!("{} {} {}", id, pwd, byname);
+                    }
+                }
+                println!("{} {}", id, pwd);
                 client.json(params)
             })
         });
