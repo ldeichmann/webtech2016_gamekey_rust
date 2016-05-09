@@ -1,0 +1,19 @@
+[package]
+name = "webtech2016_gamekey_rust" # the name of the package
+version = "0.0.1"    # the current version, obeying semver
+
+[dependencies.rustless]
+git = "https://github.com/rustless/rustless"
+
+[dependencies]
+rustc-serialize = "0.3"
+valico = "0.8"
+url = "0.5"
+chrono = "0.2"
+
+[dependencies.cookie]
+version = "0.2"
+default-features = false
+
+[dependencies.iron]
+version = "0.3"
