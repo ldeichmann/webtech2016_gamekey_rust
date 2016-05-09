@@ -6,9 +6,12 @@ extern crate url;
 extern crate rustc_serialize as serialize;
 extern crate valico;
 extern crate chrono;
+extern crate uuid;
 
 use std::collections::LinkedList;
 use std::sync::{Arc, Mutex};
+use serialize::base64::{STANDARD, ToBase64};
+use uuid::Uuid;
 
 use std::fmt;
 use std::error;
@@ -25,20 +28,15 @@ use serialize::json::ToJson;
 #[derive(Debug)]
 struct User {
     name: String,
-    pwd: String,
+    id: String,
     email: String,
     created: String,
     signature : String
 }
 
 impl fmt::Display for User {
-    // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
-        write!(f, "{} {} {} {} {}", self.name, self.pwd, self.email, self.signature, self.created)
+        write!(f, "{} {} {} {} {}", self.name, self.id, self.email, self.signature, self.created)
     }
 }
 
@@ -116,14 +114,15 @@ fn main() {
             });
             endpoint.handle(move |client, params| {
                 println!("{}", params.find_path(&["name"]).unwrap());
-                let sig = "null";
-                let mail = "null";
+                let sig = params.find_path(&["name"]).unwrap().to_string().as_bytes().to_base64(STANDARD);
+                let mail = params.find_path(&["mail"]).unwrap().to_string();
                 let created = chrono::UTC::now();
+                let id = Uuid::new_v4().to_string();
                 let new_user = User {
                                 name: params.find_path(&["name"]).unwrap().to_string(),
-                                pwd: params.find_path(&["pwd"]).unwrap().to_string(),
+                                id: id,
                                 email: mail.to_string(),
-                                signature: sig.to_string(),
+                                signature: sig,
                                 created: created.to_string()
                               };
                 println!("new_user: {}", &new_user);
