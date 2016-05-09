@@ -3,14 +3,14 @@ extern crate rustless;
 
 extern crate iron;
 extern crate url;
-extern crate rustc_serialize as serialize;
+extern crate rustc_serialize;
 extern crate valico;
 extern crate chrono;
 extern crate uuid;
 
 use std::collections::LinkedList;
 use std::sync::{Arc, Mutex};
-use serialize::base64::{STANDARD, ToBase64};
+use rustc_serialize::base64::{STANDARD, ToBase64};
 use uuid::Uuid;
 
 use std::fmt;
@@ -19,13 +19,17 @@ use std::error::Error as StdError;
 use valico::json_dsl;
 
 use rustless::server::status;
-// use rustless::errors::{Error};
+use std::error::Error;
 use rustless::batteries::swagger;
 use rustless::{Nesting};
+use rustc_serialize::json;
 
-use serialize::json;
+use std::io::prelude::*;
+use std::fs::File;
+use std::path::Path;
 
-#[derive(Debug, RustcDecodable, RustcEncodable)]
+
+#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
 struct User {
     name: String,
     id: String,
@@ -79,8 +83,32 @@ impl fmt::Display for InvalidMail {
 }
 
 fn store_users(list: LinkedList<User>) {
-    let js = json::encode(list);
-    println!("{}", js.to_string());
+    let js = json::encode(&list).unwrap();
+    println!("\nstore_users:\n{}\n", (&js).to_string());
+
+    let path = Path::new("foo.txt");
+    let display = path.display();
+
+    let mut file = match File::create(&path) {
+        Err(why) => {
+            panic!("couldn't create {}: {}", display, Error::description(&why))
+        }
+
+        Ok(file) => {
+            file
+        }
+    };
+
+    // Write the `LOREM_IPSUM` string to `file`, returns `io::Result<()>`
+    match file.write_all(js.as_bytes()) {
+        Err(why) => {
+            panic!("couldn't write to {}: {}", display, Error::description(&why))
+        },
+        Ok(_) => {
+            println!("successfully wrote to {}", display);
+        }
+    }
+
 }
 
 fn main() {
@@ -112,7 +140,7 @@ fn main() {
             endpoint.summary("Lists all registered users");
             endpoint.desc("");
             endpoint.handle(|client, params| {
-                client.json(&params.to_json())
+                client.json(params)
             })
         });
 
@@ -141,6 +169,7 @@ fn main() {
                 println!("new_user: {}", &new_user);
                 users.lock().unwrap().push_front(new_user);
                 println!("{:?}", users);
+                store_users(users.lock().unwrap().clone());
                 client.json(params)
             })
         });
