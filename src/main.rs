@@ -113,17 +113,18 @@ fn main() {
                 params.opt_typed("mail", json_dsl::string());
             });
             endpoint.handle(move |client, params| {
-                println!("{}", params.find_path(&["name"]).unwrap());
-                let sig = params.find_path(&["name"]).unwrap().to_string().as_bytes().to_base64(STANDARD);
+                let name = params.find_path(&["name"]).unwrap().to_string();
+                let pwd  = params.find_path(&["pwd"]).unwrap().to_string();
+                let sig = (String::new() + &name + &pwd).as_bytes().to_base64(STANDARD);
                 let mail = params.find_path(&["mail"]).unwrap().to_string();
-                let created = chrono::UTC::now();
+                let created = chrono::UTC::now().to_string();
                 let id = Uuid::new_v4().to_string();
                 let new_user = User {
-                                name: params.find_path(&["name"]).unwrap().to_string(),
+                                name: name,
                                 id: id,
-                                email: mail.to_string(),
+                                email: mail,
                                 signature: sig,
-                                created: created.to_string()
+                                created: created
                               };
                 println!("new_user: {}", &new_user);
                 users.lock().unwrap().push_front(new_user);
