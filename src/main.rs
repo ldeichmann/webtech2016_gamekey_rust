@@ -9,7 +9,7 @@ extern crate chrono;
 extern crate uuid;
 extern crate regex;
 
-use std::collections::{LinkedList, HashMap};
+use std::collections::{LinkedList};
 use std::sync::{Arc, Mutex};
 use rustc_serialize::base64::{STANDARD, ToBase64};
 use uuid::Uuid;
@@ -36,14 +36,14 @@ use regex::Regex;
 struct User {
     name: String,
     id: String,
-    email: String,
+    email: Option<String>,
     created: String,
     signature : String
 }
 
 impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {} {} {} {}", self.name, self.id, self.email, self.signature, self.created)
+        write!(f, "{} {} {:?} {} {}", self.name, self.id, self.email, self.signature, self.created)
     }
 }
 
@@ -51,14 +51,14 @@ impl fmt::Display for User {
 struct Game {
     name: String,
     id: String,
-    url: String,
+    url: Option<String>,
     signature: String,
     created: String
 }
 
 impl fmt::Display for Game {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {} {} {} {}", self.name, self.id, self.url, self.signature, self.created)
+        write!(f, "{} {} {:?} {} {}", self.name, self.id, self.url, self.signature, self.created)
     }
 }
 
@@ -245,13 +245,8 @@ fn main() {
                 println!("get user: {:?}", user_json.to_string());
 
                 let test = json::Json::from_str(&user_json.to_string()).unwrap();
-                let mut fixme: HashMap<String, json::Json> = HashMap::new();
-                fixme.insert("users".to_string(), test);
-                let fixme2 = json::encode(&fixme).unwrap();
-                println!("fixme2 {}", fixme2);
-                let fixme3 = json::Json::from_str(&fixme2.to_string()).unwrap();
 
-                client.json( &fixme3 )
+                client.json( &test )
 
                 // client.json(&test)
             })
@@ -273,16 +268,31 @@ fn main() {
                 let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string();
                 let new_pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
                 let new_sig = (String::new() + &new_name + &new_pwd).as_bytes().to_base64(STANDARD);
-                let new_mail: String = match message_object.get("mail") {
-                    Some(m) => {
-                        m.as_string().unwrap().to_string()
-                    },
-                    None   => {
-                        String::new()
-                    }
-                };
                 let new_created = chrono::UTC::now().to_string();
                 let new_id = Uuid::new_v4().to_string();
+
+                let new_mail = match message_object.get("mail") {
+                    Some(m) => {
+                        let re = Regex::new(r"(?i)\A[\w-\.]+@[a-z\d]+\.[a-z]+\z").unwrap();
+
+                        match re.is_match(&m.to_string()) {
+                            false => {
+                                // println!("mail mismatch: {}", &new_mail);
+                                return Err(rustless::ErrorResponse{
+                                    error: Box::new(InvalidMail) as Box<RError + Send>,
+                                    response: None
+                                })
+                            },
+                            true  => {
+                                println!("mail match: {}", &m);
+                                Some(m.as_string().unwrap().to_string())
+                            }
+                        }
+                    },
+                    None   => {
+                        None
+                    }
+                };
 
                 let new_user = User {
                                 name: new_name.clone(),
@@ -294,25 +304,6 @@ fn main() {
                 println!("Post user, new User: {}", &new_user);
                 let users = storage_clone.lock().unwrap().users.clone();
 
-                if &new_mail != "" {
-
-                    let re = Regex::new(r"(?i)\A[\w-\.]+@[a-z\d]+\.[a-z]+\z").unwrap();
-
-                    match re.is_match(&new_mail) {
-                        false => {
-                            println!("mail mismatch: {}", &new_mail);
-                            return Err(rustless::ErrorResponse{
-                                error: Box::new(InvalidMail) as Box<RError + Send>,
-                                response: None
-                            })
-                        },
-                        true  => {
-                            println!("mail match: {}", &new_mail);
-                            ()
-                        }
-                    }
-                }
-
                 let user = get_user_by_name(users, &new_name);
 
                 match user {
@@ -321,9 +312,11 @@ fn main() {
                         client.text(format!("User with name {} exists already.", &new_name).to_string()) //sic
                     },
                     None    => {
+                        let test = json::encode(&new_user).unwrap();
+                        let test2 = json::Json::from_str(&test).unwrap();
                         storage_clone.lock().unwrap().users.push_front(new_user);
                         save_gamekey(storage_clone.lock().unwrap().clone());
-                        client.json(params)
+                        client.json(&test2)
                     }
                 }
 
