@@ -21,6 +21,7 @@ use valico::json_dsl;
 
 use std::error::Error;
 use rustless::server::status;
+use rustless::errors::Error as RError;
 use rustless::batteries::swagger;
 use rustless::{Nesting};
 use rustc_serialize::json;
@@ -218,7 +219,7 @@ fn main() {
                 Some(_) => {
                     return Some(rustless::Response::from(
                         status::StatusCode::BadRequest,
-                        Box::new("Please provide correct `token` parameter")
+                        Box::new("Invalid Email!")
                     ))
                 },
                 None => None
@@ -277,7 +278,7 @@ fn main() {
                         m.as_string().unwrap().to_string()
                     },
                     None   => {
-                        "".to_string()
+                        String::new()
                     }
                 };
                 let new_created = chrono::UTC::now().to_string();
@@ -293,8 +294,6 @@ fn main() {
                 println!("Post user, new User: {}", &new_user);
                 let users = storage_clone.lock().unwrap().users.clone();
 
-                let mut validMail: bool = false;
-
                 if &new_mail != "" {
 
                     let re = Regex::new(r"(?i)\A[\w-\.]+@[a-z\d]+\.[a-z]+\z").unwrap();
@@ -302,17 +301,20 @@ fn main() {
                     match re.is_match(&new_mail) {
                         false => {
                             println!("mail mismatch: {}", &new_mail);
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(InvalidMail) as Box<RError + Send>,
+                                response: None
+                            })
                         },
                         true  => {
                             println!("mail match: {}", &new_mail);
-                            // &mut validMail = true;
+                            ()
                         }
                     }
-                    // println!("mail match: {}", &new_mail);
-
                 }
 
                 let user = get_user_by_name(users, &new_name);
+
                 match user {
                     Some(_)  => {
                         client.set_status(status::StatusCode::Conflict);
