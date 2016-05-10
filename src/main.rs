@@ -8,7 +8,7 @@ extern crate valico;
 extern crate chrono;
 extern crate uuid;
 
-use std::collections::LinkedList;
+use std::collections::{LinkedList, HashMap};
 use std::sync::{Arc, Mutex};
 use rustc_serialize::base64::{STANDARD, ToBase64};
 use uuid::Uuid;
@@ -241,8 +241,15 @@ fn main() {
                 println!("get user: {:?}", user_json.to_string());
 
                 let test = json::Json::from_str(&user_json.to_string()).unwrap();
+                let mut fixme: HashMap<String, json::Json> = HashMap::new();
+                fixme.insert("users".to_string(), test);
+                let fixme2 = json::encode(&fixme).unwrap();
+                println!("fixme2 {}", fixme2);
+                let fixme3 = json::Json::from_str(&fixme2.to_string()).unwrap();
 
-                client.json(&test)
+                client.json( &fixme3 )
+
+                // client.json(&test)
             })
         });
 
@@ -255,7 +262,7 @@ fn main() {
                 params.req_typed("pwd", json_dsl::string());
                 params.opt_typed("mail", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
                 let message_object = params.as_object().unwrap();
 
                 let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string();
@@ -266,16 +273,29 @@ fn main() {
                 let new_id = Uuid::new_v4().to_string();
 
                 let new_user = User {
-                                name: new_name,
+                                name: new_name.clone(),
                                 id: new_id,
                                 email: new_mail,
                                 signature: new_sig,
                                 created: new_created
                               };
-                println!("new_user: {}", &new_user);
-                storage_clone.lock().unwrap().users.push_front(new_user);
-                save_gamekey(storage_clone.lock().unwrap().clone());
-                client.json(params)
+                println!("Post user, new User: {}", &new_user);
+                let users = storage_clone.lock().unwrap().users.clone();
+
+                let user = get_user_by_name(users, &new_name);
+                match user {
+                    Some(_)  => {
+                        client.set_status(status::StatusCode::Conflict);
+                        client.text(format!("User with name {} exists already.", &new_name).to_string()) //sic
+                    },
+                    None    => {
+                        storage_clone.lock().unwrap().users.push_front(new_user);
+                        save_gamekey(storage_clone.lock().unwrap().clone());
+                        client.json(params)
+                    }
+                }
+
+
             })
         });
 
@@ -318,6 +338,7 @@ fn main() {
                         if e.signature == (String::new() + &id + &pwd).as_bytes().to_base64(STANDARD) {
                             let encoded_user_json = json::encode(&e).unwrap();
                             let user_json = json::Json::from_str(&encoded_user_json.to_string()).unwrap();
+
                             client.json(&user_json)
                         } else {
                             client.set_status(status::StatusCode::Unauthorized);
