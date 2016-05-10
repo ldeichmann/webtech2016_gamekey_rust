@@ -7,6 +7,7 @@ extern crate rustc_serialize;
 extern crate valico;
 extern crate chrono;
 extern crate uuid;
+extern crate regex;
 
 use std::collections::{LinkedList, HashMap};
 use std::sync::{Arc, Mutex};
@@ -18,8 +19,8 @@ use std::error;
 use std::error::Error as StdError;
 use valico::json_dsl;
 
-use rustless::server::status;
 use std::error::Error;
+use rustless::server::status;
 use rustless::batteries::swagger;
 use rustless::{Nesting};
 use rustc_serialize::json;
@@ -28,6 +29,7 @@ use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
 
+use regex::Regex;
 
 #[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
 struct User {
@@ -94,6 +96,7 @@ impl error::Error for InvalidMail {
         return "InvalidMail";
     }
 }
+
 
 impl fmt::Display for InvalidMail {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -262,25 +265,52 @@ fn main() {
                 params.req_typed("pwd", json_dsl::string());
                 params.opt_typed("mail", json_dsl::string());
             });
+
             endpoint.handle(move |mut client, params| {
                 let message_object = params.as_object().unwrap();
 
                 let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string();
                 let new_pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
                 let new_sig = (String::new() + &new_name + &new_pwd).as_bytes().to_base64(STANDARD);
-                let new_mail = message_object.get("mail").unwrap().as_string().unwrap().to_string();
+                let new_mail: String = match message_object.get("mail") {
+                    Some(m) => {
+                        m.as_string().unwrap().to_string()
+                    },
+                    None   => {
+                        "".to_string()
+                    }
+                };
                 let new_created = chrono::UTC::now().to_string();
                 let new_id = Uuid::new_v4().to_string();
 
                 let new_user = User {
                                 name: new_name.clone(),
                                 id: new_id,
-                                email: new_mail,
+                                email: new_mail.clone(),
                                 signature: new_sig,
                                 created: new_created
                               };
                 println!("Post user, new User: {}", &new_user);
                 let users = storage_clone.lock().unwrap().users.clone();
+
+                let mut validMail: bool = false;
+
+                if &new_mail != "" {
+
+                    let re = Regex::new(r"(?i)\A[\w-\.]+@[a-z\d]+\.[a-z]+\z").unwrap();
+
+                    match re.is_match(&new_mail) {
+                        false => {
+                            println!("mail mismatch: {}", &new_mail);
+                        },
+                        true  => {
+                            println!("mail match: {}", &new_mail);
+                            // &mut validMail = true;
+                        }
+                    }
+                    // println!("mail match: {}", &new_mail);
+
+                }
 
                 let user = get_user_by_name(users, &new_name);
                 match user {
