@@ -147,7 +147,7 @@ fn get_gamekey() -> GameKey {
     };
     println!("gk match: {}", gk);
 
-    return create_gamekey();
+    return gk;
 
 }
 
@@ -178,18 +178,35 @@ fn save_gamekey(gk: GameKey) {
     }
 }
 
+fn get_user_by_id(list: LinkedList<User>, id: &str) -> Option<User> {
+    println!("get_user_by_id called with {} \n {:?}", id, list);
+    for e in list {
+        println!("\nget_user_by_id: e {} id {}", e, id);
+        if e.id == id {
+            println!("{}", e);
+            return Some(e)
+        }
+    }
+    None
+}
+
+
+fn get_user_by_name(list: LinkedList<User>, id: &str) -> Option<User> {
+    for e in list {
+        println!("\nget_user_by_name: e {} id {}", e, id);
+        if e.name == id {
+            println!("{}", e);
+            return Some(e)
+        }
+    }
+    None
+}
 
 fn main() {
 
     let storage = Arc::new(Mutex::new(get_gamekey()));
-    // let users = Arc::new(Mutex::new(LinkedList::new()));
-    // let mut games = LinkedList::new();
-    // let mut gamestates = LinkedList::new();
-
 
     let app = rustless::Application::new(rustless::Api::build(|api| {
-        // api.prefix("api");
-        // api.version("v1", rustless::Versioning::AcceptHeader("chat"));
 
         api.mount(swagger::create_api("api-docs"));
 
@@ -209,7 +226,6 @@ fn main() {
         api.get("users", |endpoint| {
             endpoint.summary("Lists all registered users");
             endpoint.desc("");
-            // let storage_clone = storage.clone();
             endpoint.handle(move |client, _| {
                 let users: LinkedList<User> = storage_clone.lock().unwrap().users.clone();
 
@@ -263,6 +279,7 @@ fn main() {
             })
         });
 
+        let storage_clone = storage.clone();
         api.get("user/:id", |endpoint| {
             endpoint.summary("Retrieves user data");
             endpoint.desc("Use this to retrieve a users data");
@@ -271,17 +288,48 @@ fn main() {
                 params.req_typed("pwd", json_dsl::string());
                 params.opt_typed("byname", json_dsl::boolean());
             });
-            endpoint.handle(|client, params| {
-                let id = params.find_path(&["id"]).unwrap().to_string();
-                let pwd  = params.find_path(&["pwd"]).unwrap().to_string();
-                match params.find_path(&["byname"]) {
-                    None => { println!("no byname"); }
-                    Some(byname) => {
-                        println!("{} {} {}", id, pwd, byname);
+            endpoint.handle(move |mut client, params| {
+                let message_object = params.as_object().unwrap();
+
+                let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
+                let pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
+                let byname: bool = match message_object.get("byname") {
+                    Some(v) => {
+                        v.as_boolean().unwrap()
+                    },
+                    None => {
+                        false
+                    }
+                };
+
+                let users = storage_clone.lock().unwrap().users.clone();
+
+                let user = match byname {
+                    true  => {
+                        get_user_by_name(users, &id)
+                    },
+                    false => {
+                        get_user_by_id(users, &id)
+                    }
+                };
+
+                match user {
+                    Some(e) => {
+                        if e.signature == (String::new() + &id + &pwd).as_bytes().to_base64(STANDARD) {
+                            let encoded_user_json = json::encode(&e).unwrap();
+                            let user_json = json::Json::from_str(&encoded_user_json.to_string()).unwrap();
+                            client.json(&user_json)
+                        } else {
+                            client.set_status(status::StatusCode::Unauthorized);
+                            client.text("unauthorized, please provide correct credentials".to_string())
+                        }
+                    },
+                    None    => {
+                        client.set_status(status::StatusCode::NotFound);
+                        client.text("User not found".to_string())
                     }
                 }
-                println!("{} {}", id, pwd);
-                client.json(params)
+
             })
         });
 
