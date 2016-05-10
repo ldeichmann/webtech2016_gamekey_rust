@@ -8,6 +8,8 @@ extern crate valico;
 extern crate chrono;
 extern crate uuid;
 extern crate regex;
+extern crate crypto;
+
 
 use std::collections::{LinkedList};
 use std::sync::{Arc, Mutex};
@@ -25,6 +27,8 @@ use rustless::errors::Error as RError;
 use rustless::batteries::swagger;
 use rustless::{Nesting};
 use rustc_serialize::json;
+use crypto::sha2;
+use crypto::digest::Digest;
 
 use std::io::prelude::*;
 use std::fs::File;
@@ -104,6 +108,37 @@ impl fmt::Display for InvalidMail {
         self.description().fmt(formatter)
     }
 }
+
+fn auth_signature(id: String, pwd: String) -> String {
+
+    println!("auth_signature call: id {} pwd {}", &id, &pwd);
+
+    // create a Sha256 object
+    let mut hasher = sha2::Sha256::new();
+    // write input message
+    let in_str = id + "," + &pwd;
+
+    // println!("auth_signature call: in_str {}", &in_str);
+
+    hasher.input_str(&in_str);
+    // read hash digest
+    // let hex = hasher.result_str();
+
+    // let mut bytes = vec!(hasher.output_bytes(), u8);
+    let mut bytes = Vec::new();
+    bytes.resize(hasher.output_bytes(), 0u8);
+
+    hasher.result(bytes.as_mut_slice());
+
+    // println!("auth_signature: hex {}\nsha256 {:?}", hex, bytes);
+
+    let base = bytes.to_base64(STANDARD);
+
+    println!("auth_signature: base {:?}", base);
+
+    base
+}
+
 
 fn create_gamekey() -> GameKey {
 
@@ -265,11 +300,11 @@ fn main() {
             endpoint.handle(move |mut client, params| {
                 let message_object = params.as_object().unwrap();
 
-                let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string();
+                let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string().replace("+", " "); // why...
                 let new_pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
-                let new_sig = (String::new() + &new_name + &new_pwd).as_bytes().to_base64(STANDARD);
                 let new_created = chrono::UTC::now().to_string();
                 let new_id = Uuid::new_v4().to_string();
+                let new_sig = auth_signature(new_id.clone(), new_pwd.clone());
 
                 let new_mail = match message_object.get("mail") {
                     Some(m) => {
@@ -301,7 +336,7 @@ fn main() {
                                 signature: new_sig,
                                 created: new_created
                               };
-                println!("Post user, new User: {}", &new_user);
+                println!("Post user: new User: {}", &new_user);
                 let users = storage_clone.lock().unwrap().users.clone();
 
                 let user = get_user_by_name(users, &new_name);
