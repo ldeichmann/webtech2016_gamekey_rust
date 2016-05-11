@@ -14,6 +14,7 @@ uuid = "0.2"
 regex = "0.1"
 params = "0.2.0"
 rust-crypto = "0.2.35"
+urlencoded = "0.3.0"
 
 [dependencies.cookie]
 version = "0.2"

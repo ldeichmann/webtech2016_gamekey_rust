@@ -9,9 +9,10 @@ extern crate chrono;
 extern crate uuid;
 extern crate regex;
 extern crate crypto;
+extern crate urlencoded;
 
 
-use std::collections::{LinkedList};
+use std::collections::{BTreeMap};
 use std::sync::{Arc, Mutex};
 use rustc_serialize::base64::{STANDARD, ToBase64};
 use uuid::Uuid;
@@ -27,6 +28,7 @@ use rustless::errors::Error as RError;
 use rustless::batteries::swagger;
 use rustless::{Nesting};
 use rustc_serialize::json;
+use rustc_serialize::json::{ToJson, Json};
 use crypto::sha2;
 use crypto::digest::Digest;
 
@@ -36,7 +38,8 @@ use std::path::Path;
 
 use regex::Regex;
 
-#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Debug, RustcDecodable)]
+#[allow(non_snake_case)] // fuck you type
 struct User {
     name: String,
     id: String,
@@ -45,13 +48,29 @@ struct User {
     signature : String
 }
 
+
+// Specify encoding method manually
+impl ToJson for User {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        // All standard types implement `to_json()`, so use it
+        d.insert("type".to_string(), "user".to_json());
+        d.insert("name".to_string(), self.name.to_json());
+        d.insert("id".to_string(), self.id.to_json());
+        d.insert("email".to_string(), self.email.to_json());
+        d.insert("created".to_string(), self.created.to_json());
+        d.insert("signature".to_string(), self.signature.to_json());
+        Json::Object(d)
+    }
+}
+
 impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {} {:?} {} {}", self.name, self.id, self.email, self.signature, self.created)
     }
 }
 
-#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Debug, RustcDecodable)]
 struct Game {
     name: String,
     id: String,
@@ -60,18 +79,47 @@ struct Game {
     created: String
 }
 
+// Specify encoding method manually
+impl ToJson for Game {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        // All standard types implement `to_json()`, so use it
+        d.insert("type".to_string(), "game".to_json());
+        d.insert("name".to_string(), self.name.to_json());
+        d.insert("id".to_string(), self.id.to_json());
+        d.insert("url".to_string(), self.url.to_json());
+        d.insert("created".to_string(), self.created.to_json());
+        d.insert("signature".to_string(), self.signature.to_json());
+        Json::Object(d)
+    }
+}
+
 impl fmt::Display for Game {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {} {:?} {} {}", self.name, self.id, self.url, self.signature, self.created)
     }
 }
 
-#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Debug, RustcDecodable)]
 struct Gamestate {
     gameid: String,
     userid: String,
     created: String,
     state: String
+}
+
+// Specify encoding method manually
+impl ToJson for Gamestate {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        // All standard types implement `to_json()`, so use it
+        d.insert("type".to_string(), "gamestate".to_json());
+        d.insert("gameid".to_string(), self.gameid.to_json());
+        d.insert("userid".to_string(), self.userid.to_json());
+        d.insert("created".to_string(), self.created.to_json());
+        d.insert("state".to_string(), self.state.to_json());
+        Json::Object(d)
+    }
 }
 
 impl fmt::Display for Gamestate {
@@ -80,11 +128,23 @@ impl fmt::Display for Gamestate {
     }
 }
 
-#[derive(Clone, Debug, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Debug, RustcDecodable)]
 struct GameKey {
-    users: LinkedList<User>,
-    games: LinkedList<Game>,
-    gamestates: LinkedList<Gamestate>
+    users: Vec<User>,
+    games: Vec<Game>,
+    gamestates: Vec<Gamestate>
+}
+
+// Specify encoding method manually
+impl ToJson for GameKey {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        // All standard types implement `to_json()`, so use it
+        d.insert("users".to_string(), self.users.to_json());
+        d.insert("games".to_string(), self.games.to_json());
+        d.insert("gamestates".to_string(), self.gamestates.to_json());
+        Json::Object(d)
+    }
 }
 
 impl fmt::Display for GameKey {
@@ -111,8 +171,6 @@ impl fmt::Display for InvalidMail {
 
 fn auth_signature(id: String, pwd: String) -> String {
 
-    println!("auth_signature call: id {} pwd {}", &id, &pwd);
-
     // create a Sha256 object
     let mut hasher = sha2::Sha256::new();
     // write input message
@@ -134,17 +192,15 @@ fn auth_signature(id: String, pwd: String) -> String {
 
     let base = bytes.to_base64(STANDARD);
 
-    println!("auth_signature: base {:?}", base);
-
     base
 }
 
 
 fn create_gamekey() -> GameKey {
 
-    let users: LinkedList<User> = LinkedList::new();
-    let games: LinkedList<Game> = LinkedList::new();
-    let gamestates: LinkedList<Gamestate> = LinkedList::new();
+    let users: Vec<User> = Vec::new();
+    let games: Vec<Game> = Vec::new();
+    let gamestates: Vec<Gamestate> = Vec::new();
 
     GameKey {users: users, games: games, gamestates: gamestates}
 
@@ -191,8 +247,8 @@ fn get_gamekey() -> GameKey {
 }
 
 fn save_gamekey(gk: GameKey) {
-    let js = json::encode(&gk).unwrap();
-    println!("\nsave_gamekey got:\n{}\n", (&js).to_string());
+    let js = &gk.to_json().to_string();
+    println!("\nsave_gamekey got:\n{}\n", &js);
 
     let path = Path::new("foo.txt");
     let display = path.display();
@@ -217,7 +273,7 @@ fn save_gamekey(gk: GameKey) {
     }
 }
 
-fn get_user_by_id(list: LinkedList<User>, id: &str) -> Option<User> {
+fn get_user_by_id(list: Vec<User>, id: &str) -> Option<User> {
     println!("get_user_by_id called with {} \n {:?}", id, list);
     for e in list {
         println!("\nget_user_by_id: e {} id {}", e, id);
@@ -230,9 +286,9 @@ fn get_user_by_id(list: LinkedList<User>, id: &str) -> Option<User> {
 }
 
 
-fn get_user_by_name(list: LinkedList<User>, id: &str) -> Option<User> {
+fn get_user_by_name(list: Vec<User>, id: &str) -> Option<User> {
     for e in list {
-        println!("\nget_user_by_name: e {} id {}", e, id);
+        println!("\nget_user_by_name: e \"{}\" id \"{}\"", e, id);
         if e.name == id {
             println!("{}", e);
             return Some(e)
@@ -266,22 +322,13 @@ fn main() {
             endpoint.summary("Lists all registered users");
             endpoint.desc("");
             endpoint.handle(move |client, _| {
-                let users: LinkedList<User> = storage_clone.lock().unwrap().users.clone();
+                let users: Vec<User> = storage_clone.lock().unwrap().users.clone();
 
-                let user_json = match json::encode(&users) {
-                    Ok(v) => {
-                        v
-                    },
-                    Err(err) => {
-                        panic!("fuck {:?}", err);
-                    }
-                };
+                let user_json = &users.to_json();
 
                 println!("get user: {:?}", user_json.to_string());
 
-                let test = json::Json::from_str(&user_json.to_string()).unwrap();
-
-                client.json( &test )
+                client.json( &user_json )
 
                 // client.json(&test)
             })
@@ -308,11 +355,12 @@ fn main() {
 
                 let new_mail = match message_object.get("mail") {
                     Some(m) => {
+                        println!("new_mail some: \"{}\"", &m.as_string().unwrap());
                         let re = Regex::new(r"(?i)\A[\w-\.]+@[a-z\d]+\.[a-z]+\z").unwrap();
 
-                        match re.is_match(&m.to_string()) {
+                        match re.is_match(&(m.as_string().unwrap().to_string())) {
                             false => {
-                                // println!("mail mismatch: {}", &new_mail);
+                                println!("mail mismatch: {}", &m);
                                 return Err(rustless::ErrorResponse{
                                     error: Box::new(InvalidMail) as Box<RError + Send>,
                                     response: None
@@ -347,11 +395,11 @@ fn main() {
                         client.text(format!("User with name {} exists already.", &new_name).to_string()) //sic
                     },
                     None    => {
-                        let test = json::encode(&new_user).unwrap();
-                        let test2 = json::Json::from_str(&test).unwrap();
-                        storage_clone.lock().unwrap().users.push_front(new_user);
+                        let test = &new_user.to_json();
+                        // let test2 = json::Json::from_str(&test).unwrap();
+                        storage_clone.lock().unwrap().users.push(new_user);
                         save_gamekey(storage_clone.lock().unwrap().clone());
-                        client.json(&test2)
+                        client.json(&test)
                     }
                 }
 
@@ -371,7 +419,9 @@ fn main() {
             endpoint.handle(move |mut client, params| {
                 let message_object = params.as_object().unwrap();
 
-                let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
+
+                // TODO: Hahaha, fix this shit
+                let id = String::from_utf8(url::percent_encoding::percent_decode( (message_object.get("id").unwrap().as_string().unwrap().to_string().as_bytes()))).unwrap();
                 let pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
                 let byname: bool = match message_object.get("byname") {
                     Some(v) => {
@@ -381,6 +431,10 @@ fn main() {
                         false
                     }
                 };
+
+                // let test = url::percent_encoding::percent_decode( (id.as_bytes()) );
+                //
+                // println!("\n\n\n\ntest: {}\n\n", String::from_utf8(test).unwrap() );
 
                 let users = storage_clone.lock().unwrap().users.clone();
 
@@ -395,9 +449,8 @@ fn main() {
 
                 match user {
                     Some(e) => {
-                        if e.signature == (String::new() + &id + &pwd).as_bytes().to_base64(STANDARD) {
-                            let encoded_user_json = json::encode(&e).unwrap();
-                            let user_json = json::Json::from_str(&encoded_user_json.to_string()).unwrap();
+                        if e.signature == auth_signature(e.id.clone(), pwd.clone()) {
+                            let user_json = &e.to_json();
 
                             client.json(&user_json)
                         } else {
