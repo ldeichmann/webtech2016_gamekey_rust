@@ -892,7 +892,7 @@ fn main() {
 
                 let newsig: String = match message_object.get("newsecret") {
                     Some(v) => {
-                        v.as_string().unwrap().to_string()
+                        auth_signature(game_clone.id, v.as_string().unwrap().to_string().replace("+", " "))
                     },
                     None => {
                         game_clone.signature
