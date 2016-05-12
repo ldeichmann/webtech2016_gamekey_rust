@@ -683,39 +683,139 @@ fn main() {
             })
         });
 
+        let storage_clone = storage.clone();
         api.get("games", |endpoint| {
             endpoint.summary("Lists all registered games");
             endpoint.desc("Use this to list all registered games");
-            endpoint.handle(|client, params| {
-                println!("Update User ID");
-                client.json(params)
+            endpoint.handle(move |client, _| {
+                let games: Vec<Game> = storage_clone.lock().unwrap().games.clone();
+
+                let game_json = &games.to_json();
+
+                println!("get games: {:?}", game_json.to_string());
+
+                client.json( &game_json )
+
             })
         });
 
+        let storage_clone = storage.clone();
         api.post("game", |endpoint| {
             endpoint.summary("Creates a game");
             endpoint.desc("Use this to create a game");
-            endpoint.params(|params| {
+            endpoint.params(move |params| {
                 params.req_typed("name", json_dsl::string());
                 params.req_typed("secret", json_dsl::string());
                 params.opt_typed("url", json_dsl::string());
             });
-            endpoint.handle(|client, params| {
-                println!("Create game");
-                client.json(params)
+            endpoint.handle(move |mut client, params| {
+                let message_object = params.as_object().unwrap();
+
+                println!("1");
+
+                let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string().replace("+", " "); // why...
+                let new_secret  = message_object.get("secret").unwrap().as_string().unwrap().to_string();
+                let new_created = chrono::UTC::now().format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
+                let new_id = Uuid::new_v4().to_string();
+                let new_sig = auth_signature(new_id.clone(), new_secret.clone());
+
+                println!("2");
+
+                let new_url = match message_object.get("url") {
+                    Some(m) => {
+                        Some(m.as_string().unwrap().to_string())
+                    },
+                    None   => {
+                        None
+                    }
+                };
+
+                let new_game = Game {
+                                name: new_name.clone(),
+                                id: new_id,
+                                url: new_url.clone(),
+                                signature: new_sig,
+                                created: new_created
+                              };
+
+                println!("Post game: new Game: {}", &new_game);
+                let ref mut games = storage_clone.lock().unwrap().games.clone();
+
+                let game_exists = games.iter()
+                .position(|ref n| n.name == new_name)
+                .is_some();
+
+                match game_exists {
+                    true  => {
+                        client.set_status(status::StatusCode::Conflict);
+                        client.text(format!("Game with name {} exists already.", &new_name).to_string()) //sic
+                    },
+                    false => {
+                        let test = &new_game.to_json();
+                        // let test2 = json::Json::from_str(&test).unwrap();
+                        storage_clone.lock().unwrap().games.push(new_game);
+                        save_gamekey(storage_clone.lock().unwrap().clone());
+                        client.json(&test)
+                    }
+                }
+                // let user = get_user_by_name(users, &new_name);
+
+                // println!("Create game");
+                // client.json(params)
             })
         });
 
+        let storage_clone = storage.clone();
         api.get("game/:id", |endpoint| {
             endpoint.summary("Creates a game");
             endpoint.desc("Use this to create a game");
             endpoint.params(|params| {
-                params.req_typed("secret", json_dsl::string());
                 params.req_typed("id", json_dsl::string());
+                params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(|client, params| {
-                println!("Get game");
-                client.json(params)
+            endpoint.handle(move |mut client, params| {
+                let message_object = params.as_object().unwrap();
+
+                let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
+
+                let secret: String = match message_object.get("secret") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+                println!("Get Game, ID: {}", &id);
+
+                let ref mut games = storage_clone.lock().unwrap().games.clone();
+
+                let game = games.iter()
+                .find(|ref n| n.id == id);
+
+                match game {
+                    Some(e) => {
+                        if e.signature == auth_signature(e.id.clone(), secret.clone()) {
+                            let game_json = &e.to_json();
+                            client.json(&game_json)
+                        } else {
+                            client.set_status(status::StatusCode::Unauthorized);
+                            client.text("unauthorized, please provide correct credentials".to_string())
+                        }
+                    },
+                    None    => {
+                        client.set_status(status::StatusCode::NotFound);
+                        client.text("Game not found".to_string())
+                    }
+                }
+
+                //
+                // println!("Get game");
+                // client.json(params)
             })
         });
 
