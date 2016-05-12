@@ -43,7 +43,7 @@ use regex::Regex;
 struct User {
     name: String,
     id: String,
-    email: Option<String>,
+    mail: Option<String>,
     created: String,
     signature : String
 }
@@ -57,7 +57,7 @@ impl ToJson for User {
         d.insert("type".to_string(), "user".to_json());
         d.insert("name".to_string(), self.name.to_json());
         d.insert("id".to_string(), self.id.to_json());
-        d.insert("email".to_string(), self.email.to_json());
+        d.insert("mail".to_string(), self.mail.to_json());
         d.insert("created".to_string(), self.created.to_json());
         d.insert("signature".to_string(), self.signature.to_json());
         Json::Object(d)
@@ -66,7 +66,7 @@ impl ToJson for User {
 
 impl fmt::Display for User {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {} {:?} {} {}", self.name, self.id, self.email, self.signature, self.created)
+        write!(f, "{} {} {:?} {} {}", self.name, self.id, self.mail, self.signature, self.created)
     }
 }
 
@@ -164,6 +164,38 @@ impl error::Error for InvalidMail {
 
 
 impl fmt::Display for InvalidMail {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        self.description().fmt(formatter)
+    }
+}
+
+#[derive(Debug)]
+pub struct UnauthorizedError;
+
+impl error::Error for UnauthorizedError {
+    fn description(&self) -> &str {
+        return "UnauthorizedError";
+    }
+}
+
+
+impl fmt::Display for UnauthorizedError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        self.description().fmt(formatter)
+    }
+}
+
+#[derive(Debug)]
+pub struct NotFoundError;
+
+impl error::Error for NotFoundError {
+    fn description(&self) -> &str {
+        return "NotFoundError";
+    }
+}
+
+
+impl fmt::Display for NotFoundError {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         self.description().fmt(formatter)
     }
@@ -308,12 +340,19 @@ fn main() {
         api.error_formatter(|err, _media| {
             match err.downcast::<InvalidMail>() {
                 Some(_) => {
-                    return Some(rustless::Response::from(
-                        status::StatusCode::BadRequest,
-                        Box::new("Invalid Email!")
-                    ))
+                    return Some(rustless::Response::from( status::StatusCode::BadRequest, Box::new("Invalid mail!") ))
                 },
-                None => None
+                None => match err.downcast::<UnauthorizedError>() {
+                    Some(_) => {
+                        Some(rustless::Response::from(status::StatusCode::Unauthorized, Box::new("Unauthorized!")))
+                    },
+                    None => match err.downcast::<NotFoundError>() {
+                        Some(_) => {
+                            Some(rustless::Response::from(status::StatusCode::NotFound, Box::new("Not found!")))
+                        },
+                        None => None
+                    }
+                }
             }
         });
 
@@ -349,7 +388,7 @@ fn main() {
 
                 let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string().replace("+", " "); // why...
                 let new_pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
-                let new_created = chrono::UTC::now().to_string();
+                let new_created = chrono::UTC::now().format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
                 let new_id = Uuid::new_v4().to_string();
                 let new_sig = auth_signature(new_id.clone(), new_pwd.clone());
 
@@ -380,7 +419,7 @@ fn main() {
                 let new_user = User {
                                 name: new_name.clone(),
                                 id: new_id,
-                                email: new_mail.clone(),
+                                mail: new_mail.clone(),
                                 signature: new_sig,
                                 created: new_created
                               };
@@ -467,19 +506,86 @@ fn main() {
             })
         });
 
+        let storage_clone = storage.clone();
         api.put("user/:id", |endpoint| {
             endpoint.summary("Updates a user");
             endpoint.desc("Use this to update a users data");
             endpoint.params(|params| {
-                params.req_typed("name", json_dsl::string());
+                params.req_typed("id", json_dsl::string());
                 params.req_typed("pwd", json_dsl::string());
                 params.opt_typed("name", json_dsl::string());
                 params.opt_typed("mail", json_dsl::string());
                 params.opt_typed("newpwd", json_dsl::string());
             });
-            endpoint.handle(|client, params| {
+            endpoint.handle(move |client, params| {
+                let message_object = params.as_object().unwrap();
+
+                // TODO: Hahaha, fix this shit
+                let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
+                let pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
+
+                let users = storage_clone.lock().unwrap().users.clone();
+                let user = get_user_by_id(users, &id);
+
+                let mut user_unwrapped = match user {
+                    Some(e) => {
+                        if e.signature != auth_signature(e.id.clone(), pwd.clone()) {
+                            println!("signature mismatch: {}", &e);
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
+                        } else {
+                            e
+                        }
+                    },
+                    None   => {
+                        println!("user not found: {}", &id);
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+                let usr = user_unwrapped.clone();
+                let name: String = match message_object.get("name") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        usr.name
+                    }
+                };
+
+                let usr = user_unwrapped.clone();
+                let mail: Option<String> = match message_object.get("mail") {
+                    Some(v) => {
+                        Some(v.as_string().unwrap().to_string())
+                    },
+                    None => {
+                        usr.mail
+                    }
+                };
+
+                let usr = user_unwrapped.clone();
+                let newsig: String = match message_object.get("newpwd") {
+                    Some(v) => {
+                        auth_signature(usr.id, v.as_string().unwrap().to_string())
+                    },
+                    None => {
+                        usr.signature
+                    }
+                };
+
+                user_unwrapped.name = name;
+                user_unwrapped.mail = mail;
+                user_unwrapped.signature = newsig;
+
                 println!("Update User ID");
-                client.json(params)
+                let test = &user_unwrapped.to_json();
+                save_gamekey(storage_clone.lock().unwrap().clone());
+                client.json(&test)
             })
         });
 
@@ -490,7 +596,7 @@ fn main() {
                 params.req_typed("id", json_dsl::string());
                 params.req_typed("pwd", json_dsl::string());
             });
-            endpoint.handle(|client, params| {
+            endpoint.handle(move |client, params| {
                 println!("Delete User ID");
                 client.json(params)
             })
