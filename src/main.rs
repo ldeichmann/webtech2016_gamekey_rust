@@ -37,6 +37,7 @@ use std::fs::File;
 use std::path::Path;
 
 use regex::Regex;
+use chrono::*;
 
 #[derive(Clone, Debug, RustcDecodable)]
 #[allow(non_snake_case)] // fuck you type
@@ -105,7 +106,9 @@ struct Gamestate {
     gameid: String,
     userid: String,
     created: String,
-    state: String
+    state: String,
+    gamename: String,
+    username: String
 }
 
 // Specify encoding method manually
@@ -117,6 +120,8 @@ impl ToJson for Gamestate {
         d.insert("gameid".to_string(), self.gameid.to_json());
         d.insert("userid".to_string(), self.userid.to_json());
         d.insert("created".to_string(), self.created.to_json());
+        d.insert("gamename".to_string(), self.gamename.to_json());
+        d.insert("username".to_string(), self.username.to_json());
         d.insert("state".to_string(), Json::from_str(&self.state).unwrap());
         Json::Object(d)
     }
@@ -201,6 +206,22 @@ impl fmt::Display for NotFoundError {
     }
 }
 
+#[derive(Debug)]
+pub struct BadRequestError;
+
+impl error::Error for BadRequestError {
+    fn description(&self) -> &str {
+        return "BadRequestError";
+    }
+}
+
+
+impl fmt::Display for BadRequestError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        self.description().fmt(formatter)
+    }
+}
+
 fn auth_signature(id: String, pwd: String) -> String {
 
     // create a Sha256 object
@@ -246,8 +267,8 @@ fn get_gamekey() -> GameKey {
     let mut file = match File::open(&path) {
         // The `description` method of `io::Error` returns a string that
         // describes the error
-        Err(why) => {
-            println!("couldn't open {}: {}", display, Error::description(&why));
+        Err(_) => {
+            // println!("couldn't open {}: {}", display, Error::description(&why));
             return create_gamekey();
         },
         Ok(file) => {
@@ -260,7 +281,8 @@ fn get_gamekey() -> GameKey {
     match file.read_to_string(&mut s) {
         Err(why) => panic!("couldn't read {}: {}", display,
                                                    Error::description(&why)),
-        Ok(_) => println!("{} contains:\n{}", display, s),
+        // Ok(_) => println!("{} contains:\n{}", display, s),
+        Ok(_) => {}
     }
 
     let gk: GameKey = match json::decode(s.as_str()) {
@@ -272,7 +294,7 @@ fn get_gamekey() -> GameKey {
             create_gamekey()
         }
     };
-    println!("gk match: {}", gk);
+    // println!("gk match: {}", gk);
 
     return gk;
 
@@ -280,7 +302,7 @@ fn get_gamekey() -> GameKey {
 
 fn save_gamekey(gk: GameKey) {
     let js = &gk.to_json().to_string();
-    println!("\nsave_gamekey got:\n{}\n", &js);
+    println!("Saving GameKey");
 
     let path = Path::new("foo.txt");
     let display = path.display();
@@ -296,21 +318,21 @@ fn save_gamekey(gk: GameKey) {
     };
 
     match file.write_all(js.as_bytes()) {
-        Err(why) => {
-            panic!("couldn't write to {}: {}", display, Error::description(&why))
+        Err(_) => {
+            // panic!("couldn't write to {}: {}", display, Error::description(&why))
         },
         Ok(_) => {
-            println!("successfully wrote to {}", display);
+            // println!("successfully wrote to {}", display);
         }
     }
 }
 
 fn get_user_by_id(list: Vec<User>, id: &str) -> Option<User> {
-    println!("get_user_by_id called with {} \n {:?}", id, list);
+    // println!("get_user_by_id called with {} \n {:?}", id, list);
     for e in list {
-        println!("\nget_user_by_id: e {} id {}", e, id);
+        // println!("\nget_user_by_id: e {} id {}", e, id);
         if e.id == id {
-            println!("{}", e);
+            // println!("{}", e);
             return Some(e)
         }
     }
@@ -320,9 +342,9 @@ fn get_user_by_id(list: Vec<User>, id: &str) -> Option<User> {
 
 fn get_user_by_name(list: Vec<User>, id: &str) -> Option<User> {
     for e in list {
-        println!("\nget_user_by_name: e \"{}\" id \"{}\"", e, id);
+        // println!("\nget_user_by_name: e \"{}\" id \"{}\"", e, id);
         if e.name == id {
-            println!("{}", e);
+            // println!("{}", e);
             return Some(e)
         }
     }
@@ -350,7 +372,12 @@ fn main() {
                         Some(_) => {
                             Some(rustless::Response::from(status::StatusCode::NotFound, Box::new("Not found!")))
                         },
-                        None => None
+                        None => match err.downcast::<BadRequestError>() {
+                            Some(_) => {
+                                Some(rustless::Response::from(status::StatusCode::BadRequest, Box::new("Bad request!")))
+                            },
+                            None => None
+                        }
                     }
                 }
             }
@@ -365,7 +392,7 @@ fn main() {
 
                 let user_json = &users.to_json();
 
-                println!("get user: {:?}", user_json.to_string());
+                println!("Get Users!");
 
                 client.json( &user_json )
 
@@ -379,17 +406,32 @@ fn main() {
             endpoint.desc("Use this to create a user");
             endpoint.params(|params| {
                 params.req_typed("name", json_dsl::string());
-                params.req_typed("pwd", json_dsl::string());
+                params.opt_typed("pwd", json_dsl::string());
                 params.opt_typed("mail", json_dsl::string());
             });
 
             endpoint.handle(move |mut client, params| {
                 let message_object = params.as_object().unwrap();
 
+                println!("Post User:\nparams: {}", params);
+
                 let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string().replace("+", " "); // why...
-                let new_pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
+                // let new_pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
                 let new_created = chrono::UTC::now().format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
                 let new_id = Uuid::new_v4().to_string();
+
+                let new_pwd: String = match message_object.get("pwd") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(BadRequestError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
                 let new_sig = auth_signature(new_id.clone(), new_pwd.clone());
 
                 let new_mail = match message_object.get("mail") {
@@ -503,7 +545,15 @@ fn main() {
                 match user {
                     Some(e) => {
                         if e.signature == auth_signature(e.id.clone(), pwd.clone()) {
-                            let user_json = &e.to_json();
+
+                            let ref gamestates = storage_clone.lock().unwrap().gamestates.clone();
+                            let mut gamestate = gamestates.iter().filter(|v| v.userid == e.id).map(|y| y.gameid.clone()).collect::<Vec<String>>();
+                            gamestate.sort();
+                            gamestate.dedup();
+                            let games = gamestate.to_json();
+
+                            let mut user_json = e.to_json();
+                            user_json.as_object_mut().unwrap().insert("games".to_string(), games);
 
                             client.json(&user_json)
                         } else {
@@ -671,11 +721,22 @@ fn main() {
                     }
                 };
 
-                let ref mut usrs = storage_clone.lock().unwrap().users;
+                {
+                    let ref mut gamestates = storage_clone.lock().unwrap().gamestates;
 
-                usrs.iter()
-                .position(|ref n| n.id == id)
-                .map(|e| usrs.remove(e));
+                    gamestates.iter()
+                    .position(|ref n| n.userid == id)
+                    .map(|e| gamestates.remove(e));
+                }
+
+                {
+                    let ref mut usrs = storage_clone.lock().unwrap().users;
+
+                    usrs.iter()
+                    .position(|ref n| n.id == id)
+                    .map(|e| usrs.remove(e));
+                }
+                save_gamekey(storage_clone.lock().unwrap().clone());
 
                 client.text("User removed".to_string())
             })
@@ -709,15 +770,11 @@ fn main() {
             endpoint.handle(move |mut client, params| {
                 let message_object = params.as_object().unwrap();
 
-                println!("1");
-
                 let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string().replace("+", " "); // why...
                 let new_secret  = message_object.get("secret").unwrap().as_string().unwrap().to_string();
                 let new_created = chrono::UTC::now().format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
                 let new_id = Uuid::new_v4().to_string();
                 let new_sig = auth_signature(new_id.clone(), new_secret.clone());
-
-                println!("2");
 
                 let new_url = match message_object.get("url") {
                     Some(m) => {
@@ -798,7 +855,14 @@ fn main() {
                 match game {
                     Some(e) => {
                         if e.signature == auth_signature(e.id.clone(), secret.clone()) {
-                            let game_json = &e.to_json();
+
+                            let ref gamestates = storage_clone.lock().unwrap().gamestates.clone();
+                            let gamestate = gamestates.iter().filter(|v| v.gameid == e.id).map(|y| y.userid.clone()).collect::<Vec<String>>();
+                            let games = gamestate.to_json();
+
+                            let mut game_json = e.to_json();
+                            game_json.as_object_mut().unwrap().insert("users".to_string(), games);
+
                             client.json(&game_json)
                         } else {
                             client.set_status(status::StatusCode::Unauthorized);
@@ -965,11 +1029,28 @@ fn main() {
                     }
                 };
 
-                let ref mut gms = storage_clone.lock().unwrap().games;
 
-                gms.iter()
-                .position(|ref n| n.id == id)
-                .map(|e| gms.remove(e));
+                {
+                    let ref mut gamestates = storage_clone.lock().unwrap().gamestates;
+
+                    gamestates.retain(|g| g.gameid != id);
+
+                    // gamestates.iter()
+                    // .position(|ref n| n.gameid == id).
+                    // map(|e| {
+                    //     println!("Removing gamestate");
+                    //      gamestates.remove(e);
+                    //  });
+                }
+
+                {
+                    let ref mut gms = storage_clone.lock().unwrap().games;
+
+                    gms.iter()
+                    .position(|ref n| n.id == id)
+                    .map(|e| gms.remove(e));
+                }
+                save_gamekey(storage_clone.lock().unwrap().clone());
 
                 client.text("Game removed".to_string())
             })
@@ -981,7 +1062,7 @@ fn main() {
             endpoint.desc("..");
             endpoint.params(|params| {
                 params.req_typed("gameid", json_dsl::string());
-                params.req_typed("secret", json_dsl::string());
+                params.opt_typed("secret", json_dsl::string());
             });
             endpoint.handle(move |mut client, params| {
                 let message_object = params.as_object().unwrap();
@@ -1038,7 +1119,7 @@ fn main() {
             endpoint.params(|params| {
                 params.req_typed("gameid", json_dsl::string());
                 params.req_typed("userid", json_dsl::string());
-                params.req_typed("secret", json_dsl::string());
+                params.opt_typed("secret", json_dsl::string());
             });
             endpoint.handle(move |mut client, params| {
                 let message_object = params.as_object().unwrap();
@@ -1072,7 +1153,9 @@ fn main() {
                     Some(e) => {
                         if e.signature == auth_signature(e.id.clone(), secret.clone()) {
 
-                            let gamestate = gamestates.iter().filter(|x| x.gameid == e.id).filter(|v| v.userid == userid).map(|y| y.clone()).collect::<Vec<Gamestate>>();
+                            let mut gamestate = gamestates.iter().filter(|x| x.gameid == e.id).filter(|v| v.userid == userid).map(|y| y.clone()).collect::<Vec<Gamestate>>();
+
+                            gamestate.sort_by(|a, b| UTC.datetime_from_str(&b.created, "%Y-%m-%dT%H:%M:%S%.6fZ").unwrap().cmp( &UTC.datetime_from_str(&a.created, "%Y-%m-%dT%H:%M:%S%.6fZ").unwrap()));
 
                             client.json(&gamestate.to_json())
                         } else {
@@ -1095,7 +1178,7 @@ fn main() {
             endpoint.params(|params| {
                 params.req_typed("gameid", json_dsl::string());
                 params.req_typed("userid", json_dsl::string());
-                params.req_typed("secret", json_dsl::string());
+                params.opt_typed("secret", json_dsl::string());
                 params.req_typed("state", json_dsl::string());
                 //TODO check state thingy
             });
@@ -1104,10 +1187,36 @@ fn main() {
 
                 let gameid = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
                 let userid = message_object.get("userid").unwrap().as_string().unwrap().to_string();
-                let secret = message_object.get("secret").unwrap().as_string().unwrap().to_string();
-                let state  = message_object.get("state").unwrap().as_string().unwrap().to_string();
-
+                // let state  = message_object.get("state").unwrap().as_string().unwrap().to_string().replace("+", " "); // why...;
                 let new_created = chrono::UTC::now().format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
+
+                let state: String = match message_object.get("state") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string().replace("+", " ").to_json().as_string().unwrap().to_string() // why...
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+
+                let secret: String = match message_object.get("secret") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string().replace("+", " ") // why...
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+                println!("Post Gamestate:\nGameID: {}\nUserID: {}\nSecret: {}\nState: {}", &gameid, &userid, &secret, &state);
+
 
                 let users = storage_clone.lock().unwrap().users.clone();
                 let user  = get_user_by_id(users, &userid);
@@ -1148,6 +1257,8 @@ fn main() {
                                 gameid: gameid.clone(),
                                 userid: userid.clone(),
                                 state: state.clone(),
+                                gamename: game.unwrap().name.clone(),
+                                username: user.unwrap().name.clone(),
                                 created: new_created
                               };
 
