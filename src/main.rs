@@ -520,7 +520,6 @@ fn main() {
             endpoint.handle(move |client, params| {
                 let message_object = params.as_object().unwrap();
 
-                // TODO: Hahaha, fix this shit
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
                 let pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
 
@@ -589,6 +588,8 @@ fn main() {
             })
         });
 
+
+        let storage_clone = storage.clone();
         api.delete("user/:id", |endpoint| {
             endpoint.summary("Deletes a user");
             endpoint.desc("Use this to delete a user");
@@ -597,8 +598,40 @@ fn main() {
                 params.req_typed("pwd", json_dsl::string());
             });
             endpoint.handle(move |client, params| {
-                println!("Delete User ID");
-                client.json(params)
+                let message_object = params.as_object().unwrap();
+
+                let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
+                let pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
+
+                let users = storage_clone.lock().unwrap().users.clone();
+                let user = get_user_by_id(users, &id);
+
+                match user {
+                    Some(e) => {
+                        if e.signature != auth_signature(e.id.clone(), pwd.clone()) {
+                            println!("signature mismatch: {}", &e);
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
+                        }
+                    },
+                    None   => {
+                        println!("user not found: {}", &id);
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+                let ref mut usrs = storage_clone.lock().unwrap().users;
+
+                usrs.iter()
+                .position(|ref n| n.id == id)
+                .map(|e| usrs.remove(e));
+
+                client.text("User removed".to_string())
             })
         });
 
