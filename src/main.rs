@@ -606,8 +606,6 @@ fn main() {
                     }
                 };
 
-
-
                 user_unwrapped.name = name;
                 user_unwrapped.mail = mail;
                 user_unwrapped.signature = newsig;
@@ -767,8 +765,8 @@ fn main() {
 
         let storage_clone = storage.clone();
         api.get("game/:id", |endpoint| {
-            endpoint.summary("Creates a game");
-            endpoint.desc("Use this to create a game");
+            endpoint.summary("Returns a game");
+            endpoint.desc("Use this to return a game");
             endpoint.params(|params| {
                 params.req_typed("id", json_dsl::string());
                 params.opt_typed("secret", json_dsl::string());
@@ -792,7 +790,7 @@ fn main() {
 
                 println!("Get Game, ID: {}", &id);
 
-                let ref mut games = storage_clone.lock().unwrap().games.clone();
+                let ref games = storage_clone.lock().unwrap().games.clone();
 
                 let game = games.iter()
                 .find(|ref n| n.id == id);
@@ -819,34 +817,165 @@ fn main() {
             })
         });
 
+        let storage_clone = storage.clone();
         api.put("game/:id", |endpoint| {
             endpoint.summary("Updates a game");
             endpoint.desc("Use this to update a game");
             endpoint.params(|params| {
                 params.req_typed("id", json_dsl::string());
-                params.req_typed("secret", json_dsl::string());
+                params.opt_typed("secret", json_dsl::string());
                 params.opt_typed("name", json_dsl::string());
                 params.opt_typed("url", json_dsl::string());
                 params.opt_typed("newsecret", json_dsl::string());
             });
-            endpoint.handle(|client, params| {
-                println!("Update game");
-                client.json(params)
+            endpoint.handle(move |client, params| {
+                let message_object = params.as_object().unwrap();
+
+                let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
+
+                let secret: String = match message_object.get("secret") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+                let ref mut games = storage_clone.lock().unwrap().games.clone();
+
+                let game = games.iter()
+                .find(|n| n.id == id);
+
+                let mut game_unwrapped = match game {
+                    Some(e) => {
+                        if e.signature != auth_signature(e.id.clone(), secret.clone()) {
+                            println!("signature mismatch: {}", &e);
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
+                        } else {
+                            e.clone()
+                        }
+                    },
+                    None   => {
+                        println!("game not found: {}", &id);
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+                let game_clone = game_unwrapped.clone();
+                let name: String = match message_object.get("name") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string().replace("+", " ")
+                    },
+                    None => {
+                        game_clone.name
+                    }
+                };
+
+                let url: Option<String> = match message_object.get("url") {
+                    Some(v) => {
+                        Some(v.as_string().unwrap().to_string())
+                    },
+                    None => {
+                        game_clone.url
+                    }
+                };
+
+                let newsig: String = match message_object.get("newsecret") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        game_clone.signature
+                    }
+                };
+
+                game_unwrapped.name = name;
+                game_unwrapped.url = url;
+                game_unwrapped.signature = newsig;
+
+
+                let test = &game_unwrapped.to_json();
+
+                { // make sure storage is unlocked after this
+                    let ref mut gms = storage_clone.lock().unwrap().games;
+
+                    gms.iter()
+                    .position(|ref n| n.id == id)
+                    .map(|e| gms.remove(e));
+
+                    gms.push(game_unwrapped);
+
+                }
+
+                println!("Update User ID");
+                save_gamekey(storage_clone.lock().unwrap().clone());
+                client.json(&test)
+
             })
         });
 
+        let storage_clone = storage.clone();
         api.delete("game/:id", |endpoint| {
             endpoint.summary("Delete a game");
             endpoint.desc("Use this to delete a game");
             endpoint.params(|params| {
                 params.req_typed("id", json_dsl::string());
-                params.req_typed("secret", json_dsl::string());
+                params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(|client, params| {
-                println!("Delete game");
-                client.json(params)
+            endpoint.handle(move |client, params| {
+                let message_object = params.as_object().unwrap();
+
+                let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
+                let secret: String = match message_object.get("secret") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string().replace("+", " ")
+                    },
+                    None => {
+                        "".to_string()
+                    }
+                };
+
+
+                let games = storage_clone.lock().unwrap().games.clone();
+                let game = games.iter()
+                .find(|n| n.id == id);
+
+                match game {
+                    Some(e) => {
+                        if e.signature != auth_signature(e.id.clone(), secret.clone()) {
+                            println!("signature mismatch: {}", &e);
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
+                        }
+                    },
+                    None   => {
+                        println!("game not found: {}", &id)
+                    }
+                };
+
+                let ref mut gms = storage_clone.lock().unwrap().games;
+
+                gms.iter()
+                .position(|ref n| n.id == id)
+                .map(|e| gms.remove(e));
+
+                client.text("Game removed".to_string())
             })
         });
+
+        // let storage_clone = storage.clone();
 
         api.get("gamestate/:gameid", |endpoint| {
             endpoint.summary("Retrieves all gamestates for a game");
@@ -861,6 +990,8 @@ fn main() {
             })
         });
 
+        // let storage_clone = storage.clone();
+
         api.get("gamestate/:gameid/:userid", |endpoint| {
             endpoint.summary("Retrieves gamestates for a game and user");
             endpoint.desc("..");
@@ -874,6 +1005,8 @@ fn main() {
                 client.json(params)
             })
         });
+
+        // let storage_clone = storage.clone();
 
         api.post("gamestate/:gameid/:userid", |endpoint| {
             endpoint.summary("Updates gamestates for a game and user");
