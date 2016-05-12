@@ -452,7 +452,7 @@ fn main() {
             endpoint.desc("Use this to retrieve a users data");
             endpoint.params(|params| {
                 params.req_typed("id", json_dsl::string());
-                params.req_typed("pwd", json_dsl::string());
+                params.opt_typed("pwd", json_dsl::string());
                 params.opt_typed("byname", json_dsl::boolean());
             });
             endpoint.handle(move |mut client, params| {
@@ -461,7 +461,19 @@ fn main() {
 
                 // TODO: Hahaha, fix this shit
                 let id = String::from_utf8(url::percent_encoding::percent_decode( (message_object.get("id").unwrap().as_string().unwrap().to_string().as_bytes()))).unwrap();
-                let pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
+
+                let pwd: String = match message_object.get("pwd") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
                 let byname: bool = match message_object.get("byname") {
                     Some(v) => {
                         v.as_boolean().unwrap()
@@ -470,6 +482,8 @@ fn main() {
                         false
                     }
                 };
+
+                println!("Get User: {}", &id);
 
                 // let test = url::percent_encoding::percent_decode( (id.as_bytes()) );
                 //
@@ -512,7 +526,7 @@ fn main() {
             endpoint.desc("Use this to update a users data");
             endpoint.params(|params| {
                 params.req_typed("id", json_dsl::string());
-                params.req_typed("pwd", json_dsl::string());
+                params.opt_typed("pwd", json_dsl::string());
                 params.opt_typed("name", json_dsl::string());
                 params.opt_typed("mail", json_dsl::string());
                 params.opt_typed("newpwd", json_dsl::string());
@@ -521,10 +535,24 @@ fn main() {
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
-                let pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
+
+                let pwd: String = match message_object.get("pwd") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
 
                 let users = storage_clone.lock().unwrap().users.clone();
                 let user = get_user_by_id(users, &id);
+
+                println!("Put User: {}", &id);
+
 
                 let mut user_unwrapped = match user {
                     Some(e) => {
@@ -550,14 +578,14 @@ fn main() {
                 let usr = user_unwrapped.clone();
                 let name: String = match message_object.get("name") {
                     Some(v) => {
-                        v.as_string().unwrap().to_string()
+                        v.as_string().unwrap().to_string().replace("+", " ")
                     },
                     None => {
                         usr.name
                     }
                 };
 
-                let usr = user_unwrapped.clone();
+                // let usr = user_unwrapped.clone();
                 let mail: Option<String> = match message_object.get("mail") {
                     Some(v) => {
                         Some(v.as_string().unwrap().to_string())
@@ -566,23 +594,39 @@ fn main() {
                         usr.mail
                     }
                 };
-
-                let usr = user_unwrapped.clone();
+                //
+                // let usr = user_unwrapped.clone();
                 let newsig: String = match message_object.get("newpwd") {
                     Some(v) => {
-                        auth_signature(usr.id, v.as_string().unwrap().to_string())
+                        // println!("newpwd: {}", &v);
+                        auth_signature(usr.id, v.as_string().unwrap().to_string().replace("+", " "))
                     },
                     None => {
                         usr.signature
                     }
                 };
 
+
+
                 user_unwrapped.name = name;
                 user_unwrapped.mail = mail;
                 user_unwrapped.signature = newsig;
 
-                println!("Update User ID");
+
                 let test = &user_unwrapped.to_json();
+
+                { // make sure storage is unlocked after this
+                    let ref mut usrs = storage_clone.lock().unwrap().users;
+
+                    usrs.iter()
+                    .position(|ref n| n.id == id)
+                    .map(|e| usrs.remove(e));
+
+                    usrs.push(user_unwrapped);
+
+                }
+
+                println!("Update User ID");
                 save_gamekey(storage_clone.lock().unwrap().clone());
                 client.json(&test)
             })
@@ -595,13 +639,21 @@ fn main() {
             endpoint.desc("Use this to delete a user");
             endpoint.params(|params| {
                 params.req_typed("id", json_dsl::string());
-                params.req_typed("pwd", json_dsl::string());
+                params.opt_typed("pwd", json_dsl::string());
             });
             endpoint.handle(move |client, params| {
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
-                let pwd  = message_object.get("pwd").unwrap().as_string().unwrap().to_string();
+                let pwd: String = match message_object.get("pwd") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string().replace("+", " ")
+                    },
+                    None => {
+                        "".to_string()
+                    }
+                };
+
 
                 let users = storage_clone.lock().unwrap().users.clone();
                 let user = get_user_by_id(users, &id);
@@ -617,11 +669,7 @@ fn main() {
                         }
                     },
                     None   => {
-                        println!("user not found: {}", &id);
-                        return Err(rustless::ErrorResponse{
-                            error: Box::new(NotFoundError) as Box<RError + Send>,
-                            response: None
-                        })
+                        println!("user not found: {}", &id)
                     }
                 };
 
