@@ -117,7 +117,7 @@ impl ToJson for Gamestate {
         d.insert("gameid".to_string(), self.gameid.to_json());
         d.insert("userid".to_string(), self.userid.to_json());
         d.insert("created".to_string(), self.created.to_json());
-        d.insert("state".to_string(), self.state.to_json());
+        d.insert("state".to_string(), Json::from_str(&self.state).unwrap());
         Json::Object(d)
     }
 }
@@ -975,8 +975,7 @@ fn main() {
             })
         });
 
-        // let storage_clone = storage.clone();
-
+        let storage_clone = storage.clone();
         api.get("gamestate/:gameid", |endpoint| {
             endpoint.summary("Retrieves all gamestates for a game");
             endpoint.desc("..");
@@ -984,14 +983,55 @@ fn main() {
                 params.req_typed("gameid", json_dsl::string());
                 params.req_typed("secret", json_dsl::string());
             });
-            endpoint.handle(|client, params| {
-                println!("Get gamestates");
-                client.json(params)
+            endpoint.handle(move |mut client, params| {
+                let message_object = params.as_object().unwrap();
+
+                let id = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
+
+                let secret: String = match message_object.get("secret") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+                println!("Get Game, ID: {}", &id);
+
+                let ref games = storage_clone.lock().unwrap().games.clone();
+
+                let game = games.iter()
+                .find(|ref n| n.id == id);
+
+                let ref gamestates = storage_clone.lock().unwrap().gamestates.clone();
+
+
+                match game {
+                    Some(e) => {
+                        if e.signature == auth_signature(e.id.clone(), secret.clone()) {
+
+                            let gamestate = gamestates.iter().filter(|x| x.gameid == e.id).map(|y| y.clone()).collect::<Vec<Gamestate>>();
+
+                            client.json(&gamestate.to_json())
+                        } else {
+                            client.set_status(status::StatusCode::Unauthorized);
+                            client.text("unauthorized, please provide correct credentials".to_string())
+                        }
+                    },
+                    None    => {
+                        client.set_status(status::StatusCode::NotFound);
+                        client.text("Game not found".to_string())
+                    }
+                }
+
             })
         });
 
-        // let storage_clone = storage.clone();
-
+        let storage_clone = storage.clone();
         api.get("gamestate/:gameid/:userid", |endpoint| {
             endpoint.summary("Retrieves gamestates for a game and user");
             endpoint.desc("..");
@@ -1000,14 +1040,55 @@ fn main() {
                 params.req_typed("userid", json_dsl::string());
                 params.req_typed("secret", json_dsl::string());
             });
-            endpoint.handle(|client, params| {
-                println!("Get game and user");
-                client.json(params)
+            endpoint.handle(move |mut client, params| {
+                let message_object = params.as_object().unwrap();
+
+                let id = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
+                let userid = message_object.get("userid").unwrap().as_string().unwrap().to_string();
+
+                let secret: String = match message_object.get("secret") {
+                    Some(v) => {
+                        v.as_string().unwrap().to_string()
+                    },
+                    None => {
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                };
+
+                println!("Get Game, ID: {}", &id);
+
+                let ref games = storage_clone.lock().unwrap().games.clone();
+
+                let game = games.iter()
+                .find(|ref n| n.id == id);
+
+                let ref gamestates = storage_clone.lock().unwrap().gamestates.clone();
+
+
+                match game {
+                    Some(e) => {
+                        if e.signature == auth_signature(e.id.clone(), secret.clone()) {
+
+                            let gamestate = gamestates.iter().filter(|x| x.gameid == e.id).filter(|v| v.userid == userid).map(|y| y.clone()).collect::<Vec<Gamestate>>();
+
+                            client.json(&gamestate.to_json())
+                        } else {
+                            client.set_status(status::StatusCode::Unauthorized);
+                            client.text("unauthorized, please provide correct credentials".to_string())
+                        }
+                    },
+                    None    => {
+                        client.set_status(status::StatusCode::NotFound);
+                        client.text("Game not found".to_string())
+                    }
+                }
             })
         });
 
-        // let storage_clone = storage.clone();
-
+        let storage_clone = storage.clone();
         api.post("gamestate/:gameid/:userid", |endpoint| {
             endpoint.summary("Updates gamestates for a game and user");
             endpoint.desc("..");
@@ -1018,9 +1099,67 @@ fn main() {
                 params.req_typed("state", json_dsl::string());
                 //TODO check state thingy
             });
-            endpoint.handle(|client, params| {
-                println!("Get game and user");
-                client.json(params)
+            endpoint.handle(move |client, params| {
+                let message_object = params.as_object().unwrap();
+
+                let gameid = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
+                let userid = message_object.get("userid").unwrap().as_string().unwrap().to_string();
+                let secret = message_object.get("secret").unwrap().as_string().unwrap().to_string();
+                let state  = message_object.get("state").unwrap().as_string().unwrap().to_string();
+
+                let new_created = chrono::UTC::now().format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string();
+
+                let users = storage_clone.lock().unwrap().users.clone();
+                let user  = get_user_by_id(users, &userid);
+
+                let games = storage_clone.lock().unwrap().games.clone();
+                let game  = games.iter().find(|ref n| n.id == gameid);
+
+                match user {
+                    Some(_) => {},
+                    None    => {
+                        println!("user not found: {}", &userid);
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                }
+
+                match game {
+                    Some(g) => {
+                        if g.signature != auth_signature(gameid.clone(), secret.clone()) {
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
+                        }
+                    },
+                    None    => {
+                        println!("game not found: {}", &userid);
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
+                    }
+                }
+
+                let new_gamestate = Gamestate {
+                                gameid: gameid.clone(),
+                                userid: userid.clone(),
+                                state: state.clone(),
+                                created: new_created
+                              };
+
+                let test = &new_gamestate.to_json();
+                // let test2 = json::Json::from_str(&test).unwrap();
+                storage_clone.lock().unwrap().gamestates.push(new_gamestate);
+                save_gamekey(storage_clone.lock().unwrap().clone());
+                client.json(&test)
+
+                //
+                // println!("Get game and user");
+                // client.json(params)
             })
         });
 
