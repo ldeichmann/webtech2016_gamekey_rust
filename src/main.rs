@@ -222,6 +222,22 @@ impl fmt::Display for BadRequestError {
     }
 }
 
+#[derive(Debug)]
+pub struct ConflictError;
+
+impl error::Error for ConflictError {
+    fn description(&self) -> &str {
+        return "ConflictError";
+    }
+}
+
+
+impl fmt::Display for ConflictError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        self.description().fmt(formatter)
+    }
+}
+
 fn auth_signature(id: String, pwd: String) -> String {
 
     // create a Sha256 object
@@ -376,7 +392,12 @@ fn main() {
                             Some(_) => {
                                 Some(rustless::Response::from(status::StatusCode::BadRequest, Box::new("Bad request!")))
                             },
-                            None => None
+                            None => match err.downcast::<ConflictError>() {
+                                Some(_) => {
+                                    Some(rustless::Response::from(status::StatusCode::BadRequest, Box::new("Conflict!")))
+                                },
+                                None => None
+                            }
                         }
                     }
                 }
@@ -410,7 +431,7 @@ fn main() {
                 params.opt_typed("mail", json_dsl::string());
             });
 
-            endpoint.handle(move |mut client, params| {
+            endpoint.handle(move |client, params| {
                 let message_object = params.as_object().unwrap();
 
                 println!("Post User:\nparams: {}", params);
@@ -472,8 +493,10 @@ fn main() {
 
                 match user {
                     Some(_)  => {
-                        client.set_status(status::StatusCode::Conflict);
-                        client.text(format!("User with name {} exists already.", &new_name).to_string()) //sic
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(BadRequestError) as Box<RError + Send>,
+                            response: None
+                        })
                     },
                     None    => {
                         let test = &new_user.to_json();
@@ -497,7 +520,7 @@ fn main() {
                 params.opt_typed("pwd", json_dsl::string());
                 params.opt_typed("byname", json_dsl::boolean());
             });
-            endpoint.handle(move |mut client, params| {
+            endpoint.handle(move |client, params| {
                 let message_object = params.as_object().unwrap();
 
 
@@ -548,8 +571,8 @@ fn main() {
 
                             let ref gamestates = storage_clone.lock().unwrap().gamestates.clone();
                             let mut gamestate = gamestates.iter().filter(|v| v.userid == e.id).map(|y| y.gameid.clone()).collect::<Vec<String>>();
-                            gamestate.sort();
-                            gamestate.dedup();
+                            gamestate.sort(); // sort
+                            gamestate.dedup(); // and remove duplicates, damn vanity
                             let games = gamestate.to_json();
 
                             let mut user_json = e.to_json();
@@ -557,13 +580,17 @@ fn main() {
 
                             client.json(&user_json)
                         } else {
-                            client.set_status(status::StatusCode::Unauthorized);
-                            client.text("unauthorized, please provide correct credentials".to_string())
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
                         }
                     },
                     None    => {
-                        client.set_status(status::StatusCode::NotFound);
-                        client.text("User not found".to_string())
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
                     }
                 }
 
@@ -767,7 +794,7 @@ fn main() {
                 params.req_typed("secret", json_dsl::string());
                 params.opt_typed("url", json_dsl::string());
             });
-            endpoint.handle(move |mut client, params| {
+            endpoint.handle(move |client, params| {
                 let message_object = params.as_object().unwrap();
 
                 let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string().replace("+", " "); // why...
@@ -802,8 +829,10 @@ fn main() {
 
                 match game_exists {
                     true  => {
-                        client.set_status(status::StatusCode::Conflict);
-                        client.text(format!("Game with name {} exists already.", &new_name).to_string()) //sic
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(ConflictError) as Box<RError + Send>,
+                            response: None
+                        })
                     },
                     false => {
                         let test = &new_game.to_json();
@@ -828,7 +857,7 @@ fn main() {
                 params.req_typed("id", json_dsl::string());
                 params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(move |mut client, params| {
+            endpoint.handle(move |client, params| {
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
@@ -865,13 +894,17 @@ fn main() {
 
                             client.json(&game_json)
                         } else {
-                            client.set_status(status::StatusCode::Unauthorized);
-                            client.text("unauthorized, please provide correct credentials".to_string())
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
                         }
                     },
                     None    => {
-                        client.set_status(status::StatusCode::NotFound);
-                        client.text("Game not found".to_string())
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
                     }
                 }
 
@@ -1064,7 +1097,7 @@ fn main() {
                 params.req_typed("gameid", json_dsl::string());
                 params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(move |mut client, params| {
+            endpoint.handle(move |client, params| {
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
@@ -1099,13 +1132,17 @@ fn main() {
 
                             client.json(&gamestate.to_json())
                         } else {
-                            client.set_status(status::StatusCode::Unauthorized);
-                            client.text("unauthorized, please provide correct credentials".to_string())
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
                         }
                     },
                     None    => {
-                        client.set_status(status::StatusCode::NotFound);
-                        client.text("Game not found".to_string())
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
                     }
                 }
 
@@ -1121,7 +1158,7 @@ fn main() {
                 params.req_typed("userid", json_dsl::string());
                 params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(move |mut client, params| {
+            endpoint.handle(move |client, params| {
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
@@ -1159,13 +1196,17 @@ fn main() {
 
                             client.json(&gamestate.to_json())
                         } else {
-                            client.set_status(status::StatusCode::Unauthorized);
-                            client.text("unauthorized, please provide correct credentials".to_string())
+                            return Err(rustless::ErrorResponse{
+                                error: Box::new(UnauthorizedError) as Box<RError + Send>,
+                                response: None
+                            })
                         }
                     },
                     None    => {
-                        client.set_status(status::StatusCode::NotFound);
-                        client.text("Game not found".to_string())
+                        return Err(rustless::ErrorResponse{
+                            error: Box::new(NotFoundError) as Box<RError + Send>,
+                            response: None
+                        })
                     }
                 }
             })
