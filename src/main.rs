@@ -10,7 +10,8 @@ extern crate uuid;
 extern crate regex;
 extern crate crypto;
 extern crate urlencoded;
-
+extern crate hyper;
+extern crate unicase;
 
 use std::collections::{BTreeMap};
 use std::sync::{Arc, Mutex};
@@ -38,6 +39,10 @@ use std::path::Path;
 
 use regex::Regex;
 use chrono::*;
+
+use hyper::header::{AccessControlAllowOrigin, AccessControlAllowHeaders, AccessControlAllowMethods};
+use hyper::method::Method;
+use unicase::UniCase;
 
 #[derive(Clone, Debug, RustcDecodable)]
 #[allow(non_snake_case)] // fuck you type
@@ -404,11 +409,42 @@ fn main() {
             }
         });
 
+        api.options("*", |endpoint| {
+            endpoint.summary("Lists all registered users");
+            endpoint.desc("");
+            endpoint.handle(move |mut client, _| {
+
+                client.set_header(AccessControlAllowOrigin::Any);
+                client.set_header(
+                    AccessControlAllowHeaders(vec![
+                        UniCase("Origin".to_owned()),
+                        UniCase("X-Requested-With".to_owned()),
+                        UniCase("Content-Type".to_owned()),
+                        UniCase("Accept".to_owned()),
+                        UniCase("Charset".to_owned()),
+                    ])
+                );
+
+                client.set_header(
+                    AccessControlAllowMethods(vec![
+                        Method::Get,
+                        Method::Post,
+                        Method::Put,
+                        Method::Options,
+                        Method::Delete,
+                    ])
+                );
+                client.text("Go ahead".to_string())
+
+            })
+        });
+
         let storage_clone = storage.clone();
         api.get("users", |endpoint| {
             endpoint.summary("Lists all registered users");
             endpoint.desc("");
-            endpoint.handle(move |client, _| {
+            endpoint.handle(move |mut client, _| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let users: Vec<User> = storage_clone.lock().unwrap().users.clone();
 
                 let user_json = &users.to_json();
@@ -431,7 +467,8 @@ fn main() {
                 params.opt_typed("mail", json_dsl::string());
             });
 
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 println!("Post User:\nparams: {}", params);
@@ -520,7 +557,8 @@ fn main() {
                 params.opt_typed("pwd", json_dsl::string());
                 params.opt_typed("byname", json_dsl::boolean());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
 
@@ -608,7 +646,8 @@ fn main() {
                 params.opt_typed("mail", json_dsl::string());
                 params.opt_typed("newpwd", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
@@ -716,7 +755,8 @@ fn main() {
                 params.req_typed("id", json_dsl::string());
                 params.opt_typed("pwd", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
@@ -794,7 +834,8 @@ fn main() {
                 params.req_typed("secret", json_dsl::string());
                 params.opt_typed("url", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let new_name = message_object.get("name").unwrap().as_string().unwrap().to_string().replace("+", " "); // why...
@@ -857,7 +898,8 @@ fn main() {
                 params.req_typed("id", json_dsl::string());
                 params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
@@ -925,7 +967,8 @@ fn main() {
                 params.opt_typed("url", json_dsl::string());
                 params.opt_typed("newsecret", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
@@ -1029,7 +1072,8 @@ fn main() {
                 params.req_typed("id", json_dsl::string());
                 params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("id").unwrap().as_string().unwrap().to_string();
@@ -1097,7 +1141,8 @@ fn main() {
                 params.req_typed("gameid", json_dsl::string());
                 params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
@@ -1158,7 +1203,8 @@ fn main() {
                 params.req_typed("userid", json_dsl::string());
                 params.opt_typed("secret", json_dsl::string());
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let id = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
@@ -1223,7 +1269,8 @@ fn main() {
                 params.req_typed("state", json_dsl::string());
                 //TODO check state thingy
             });
-            endpoint.handle(move |client, params| {
+            endpoint.handle(move |mut client, params| {
+                client.set_header(AccessControlAllowOrigin::Any);
                 let message_object = params.as_object().unwrap();
 
                 let gameid = message_object.get("gameid").unwrap().as_string().unwrap().to_string();
@@ -1320,6 +1367,7 @@ fn main() {
     let chain = iron::Chain::new(app);
 
     iron::Iron::new(chain).http("0.0.0.0:4000").unwrap();
+
     println!("On 4000");
 
 }
